@@ -6,6 +6,7 @@
 
 #include <device.h>
 #include <devicetree.h>
+#include <drivers/flash.h>
 #include <drivers/gpio.h>
 #include <drivers/pinmux.h>
 #include <soc.h>
@@ -13,19 +14,20 @@
 #include <sys/crc.h>
 #include <zephyr.h>
 
-static constexpr uint8_t kCommand = 0xFE;
-static constexpr int kPageSize = 256;
-
 #define LED0_NODE DT_ALIAS(led0)
 #define LED1_NODE DT_ALIAS(led1)
 
 static const struct gpio_dt_spec led0 = GPIO_DT_SPEC_GET_OR(LED0_NODE, gpios, {0});
 static const struct gpio_dt_spec led1 = GPIO_DT_SPEC_GET_OR(LED1_NODE, gpios, {0});
 
+static constexpr uint8_t kCommand = 0xFE;
+static constexpr int kPageSize = NVMCTRL_ROW_SIZE;
+
 class I2C {
    public:
     I2C(SercomI2cs *regs) : regs_(regs) {}
     void init();
+
     void poll();
 
     void received(const uint8_t *in, uint8_t *out);
@@ -47,6 +49,9 @@ void I2C::init() {
     PM->APBCMASK.bit.SERCOM3_ = 1;
 
     regs_->CTRLA.bit.SWRST = 1;
+    while (regs_->SYNCBUSY.reg) {
+    }
+
     regs_->CTRLA.reg = SERCOM_I2CS_CTRLA_MODE_I2C_SLAVE;
     regs_->CTRLB.reg = SERCOM_I2CS_CTRLB_SMEN;
     regs_->ADDR.reg = SERCOM_I2CS_ADDR_ADDR(0x22);
@@ -110,6 +115,8 @@ struct Command {
     enum class ID : uint32_t {
         BININFO = 1,
         INFO = 2,
+        RESET_INTO_APP = 3,
+        RESET_INTO_BOOTLOADER = 4,
         START_FLASH = 5,
         WRITE_FLASH_PAGE = 6,
         CHKSUM_PAGES = 7,
@@ -160,13 +167,10 @@ struct Response {
     };
 };
 
-static uint16_t xmodem(uint32_t address, int size) {
-    uint8_t v = 123;
-    return crc16_itu_t(0, &v, 1);
-}
-
 class HF2 {
    public:
+    void init(const device *flash) { flash_ = flash; }
+
     void packet(const uint8_t *in, uint8_t *out);
 
    private:
@@ -180,9 +184,17 @@ class HF2 {
 
     size_t message(Command &command, Response &resp);
 
+    size_t bininfo(BinInfo &resp);
+    size_t chksum_pages(uint32_t addr, uint32_t pages, uint16_t *chksums);
+    size_t write_flash_page(uint32_t addr, const uint8_t *data);
+    size_t reset_into_app();
+
     uint8_t message_[kPageSize * 3 / 2];
     uint16_t at_ = 0;
+    const device *flash_;
 };
+
+#define APP_START_ADDRESS 0x2000
 
 void HF2::packet(const uint8_t *in, uint8_t *out) {
     uint8_t header = in[0];
@@ -212,54 +224,120 @@ void HF2::packet(const uint8_t *in, uint8_t *out) {
     out[1] = wrote | Final;
 }
 
+size_t HF2::bininfo(BinInfo &resp) {
+    resp = {
+        .mode = BinInfo::Mode::Bootloader,
+        .flash_page_size = kPageSize,
+        .flash_num_pages = 1024,
+        .max_message_size = sizeof(message_),
+        .family_id = 1234,
+    };
+    return sizeof(BinInfo);
+}
+
+size_t HF2::chksum_pages(uint32_t addr, uint32_t pages, uint16_t *chksums) {
+    for (uint32_t i = 0; i < pages; i++) {
+        chksums[i] = crc16_itu_t(0, (uint8_t *)addr + i * kPageSize, kPageSize);
+    }
+    return pages * sizeof(*chksums);
+}
+
+size_t HF2::write_flash_page(uint32_t addr, const uint8_t *data) {
+    int err = flash_erase(flash_, addr, kPageSize);
+    if (err != 0) {
+        return err;
+    }
+    return flash_write(flash_, addr, data, kPageSize);
+}
+
+static int enter_app() {
+    /* Load the Reset Handler address of the application */
+    uint32_t app_start_address = *(uint32_t *)(APP_START_ADDRESS + 4);
+
+    /**
+     * Test reset vector of application @APP_START_ADDRESS+4
+     * Sanity check on the Reset_Handler address
+     */
+    if (app_start_address < APP_START_ADDRESS || app_start_address > FLASH_SIZE) {
+        /* Stay in bootloader */
+        return -ENOENT;
+    }
+
+    /* Rebase the Stack Pointer */
+    __set_MSP(*(uint32_t *)APP_START_ADDRESS);
+
+    /* Rebase the vector table base address */
+    SCB->VTOR = ((uint32_t)APP_START_ADDRESS & SCB_VTOR_TBLOFF_Msk);
+
+    /* Jump to application Reset Handler in the application */
+    asm("bx %0" ::"r"(app_start_address));
+
+    return 0;
+}
+
+size_t HF2::reset_into_app() { return enter_app(); }
+
 size_t HF2::message(Command &command, Response &resp) {
-    resp.header.tag = command.tag;
-    resp.header.status = Header::Status::OK;
-    resp.header.status_info = 0;
+    gpio_pin_toggle(led1.port, led1.pin);
+
+    int err = -EINVAL;
 
     switch (command.command_id) {
         case Command::ID::BININFO:
-            gpio_pin_toggle(led1.port, led1.pin);
-            resp.bininfo = {
-                .mode = BinInfo::Mode::Bootloader,
-                .flash_page_size = kPageSize,
-                .flash_num_pages = 1024,
-                .max_message_size = sizeof(message_),
-                .family_id = 1234,
-            };
-            return sizeof(Header) + sizeof(BinInfo);
+            err = bininfo(resp.bininfo);
+            break;
         case Command::ID::WRITE_FLASH_PAGE:
-            return sizeof(Header);
-        case Command::ID::CHKSUM_PAGES: {
-            auto pages = command.chksum_pages.num_pages;
-            for (uint32_t i = 0; i < pages; i++) {
-                resp.chksums[i] =
-                    xmodem(command.chksum_pages.target_addr + i * kPageSize, kPageSize);
-            }
-            return sizeof(Header) + pages * sizeof(resp.chksums[0]);
-        }
+            err = write_flash_page(command.write_flash_page.target_addr,
+                                   command.write_flash_page.data);
+            break;
+        case Command::ID::CHKSUM_PAGES:
+            err = chksum_pages(command.chksum_pages.target_addr, command.chksum_pages.num_pages,
+                               resp.chksums);
+            break;
+        case Command::ID::RESET_INTO_APP:
+            err = reset_into_app();
+            break;
         default:
-            resp.header.status = Header::Status::Invalid;
-            return sizeof(Header);
+            break;
     }
+
+    if (err < 0) {
+        resp.header = {
+            .tag = command.tag,
+            .status = Header::Status::Error,
+            .status_info = -err,
+        };
+        return sizeof(Header);
+    }
+
+    resp.header = {
+        .tag = command.tag,
+        .status = Header::Status::OK,
+        .status_info = 0,
+    };
+    return sizeof(Header) + err;
 }
 
-static I2C i2c(&SERCOM3->I2CS);
+static I2C i2c((SercomI2cs *)DT_REG_ADDR_BY_IDX(DT_ALIAS(i2c), 0));
 static HF2 hf2;
 
-void I2C::received(const uint8_t *in, uint8_t *out) {
-    //    gpio_pin_toggle(led1.port, led1.pin);
-    hf2.packet(in, out);
-}
+void I2C::received(const uint8_t *in, uint8_t *out) { hf2.packet(in, out); }
 
 void main(void) {
     gpio_pin_configure_dt(&led0, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led1, GPIO_OUTPUT_INACTIVE);
 
+    auto flash = DEVICE_DT_GET(DT_ALIAS(flash));
+
+    hf2.init(flash);
     i2c.init();
+
+    //   enter_app();
 
     for (;;) {
         gpio_pin_toggle(led0.port, led0.pin);
-        i2c.poll();
+        for (int spin = 0; spin < 200000; spin++) {
+            i2c.poll();
+        }
     }
 }
