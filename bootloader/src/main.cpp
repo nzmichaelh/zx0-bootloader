@@ -9,7 +9,7 @@
 #include "i2c.h"
 
 static I2C i2c((SercomI2cs *)DT_REG_ADDR(DT_ALIAS(i2c)));
-static HF2 hf2;
+static HF2 hf2(HAL::flash);
 
 void I2C::received(const uint8_t *in, uint8_t *out) { hf2.packet(in, out); }
 
@@ -17,8 +17,6 @@ void main(void) {
     HAL::enter_app();
 
     HAL::init();
-
-    hf2.init(HAL::flash);
     i2c.init();
 
     for (;;) {
