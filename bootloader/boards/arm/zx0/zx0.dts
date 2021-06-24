@@ -25,6 +25,7 @@
 		led1 = &led1;
 		i2c = &sercom3;
 		flash = &nvmctrl;
+		app = &code_partition;
 	};
 
 	leds {
@@ -68,7 +69,7 @@
 		#size-cells = <1>;
 
 		boot_partition: partition@0 {
-			label = "uf2";
+			label = "hf2";
 			reg = <0x00000000 DT_SIZE_K(8)>;
 			read-only;
 		};
