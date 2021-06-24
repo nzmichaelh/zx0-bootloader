@@ -250,27 +250,55 @@ size_t HF2::write_flash_page(uint32_t addr, const uint8_t *data) {
     return flash_write(flash_, addr, data, kPageSize);
 }
 
+enum class DoubleTap : uint32_t {
+    None = 0,
+    Magic = 0xf01669ef,
+    QuickBoot = 0xf02669ef,
+};
+
+DoubleTap &double_tap = *(DoubleTap *)(HMCRAMC0_ADDR + HMCRAMC0_SIZE - 4);
+
+static void wait(uint32_t millis) {
+    millis *= CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 10000;
+
+    while (millis--) {
+        asm("nop; nop; nop; nop; nop");
+    }
+}
+
 static int enter_app() {
     /* Load the Reset Handler address of the application */
-    uint32_t app_start_address = *(uint32_t *)(APP_START_ADDRESS + 4);
+    uint32_t start = *(uint32_t *)(APP_START_ADDRESS + 4);
 
-    /**
-     * Test reset vector of application @APP_START_ADDRESS+4
-     * Sanity check on the Reset_Handler address
-     */
-    if (app_start_address < APP_START_ADDRESS || app_start_address > FLASH_SIZE) {
+    if (start < APP_START_ADDRESS || start > FLASH_SIZE) {
         /* Stay in bootloader */
         return -ENOENT;
     }
 
-    /* Rebase the Stack Pointer */
+    auto state = double_tap;
+    double_tap = DoubleTap::None;
+
+    if (PM->RCAUSE.bit.POR) {
+        // Just turned on, continue straight into the app.
+    } else {
+        switch (state) {
+            case DoubleTap::Magic:
+                return 0;
+            case DoubleTap::QuickBoot:
+                break;
+            default:
+                double_tap = DoubleTap::Magic;
+                // Spin to give the user a chance to press reset again.
+                wait(500);
+                double_tap = DoubleTap::None;
+                break;
+        }
+    }
+
+    // Enter the app.
     __set_MSP(*(uint32_t *)APP_START_ADDRESS);
-
-    /* Rebase the vector table base address */
     SCB->VTOR = ((uint32_t)APP_START_ADDRESS & SCB_VTOR_TBLOFF_Msk);
-
-    /* Jump to application Reset Handler in the application */
-    asm("bx %0" ::"r"(app_start_address));
+    asm("bx %0" ::"r"(start));
 
     return 0;
 }
@@ -305,7 +333,7 @@ size_t HF2::message(Command &command, Response &resp) {
         resp.header = {
             .tag = command.tag,
             .status = Header::Status::Error,
-            .status_info = -err,
+            .status_info = static_cast<uint8_t>(-err),
         };
         return sizeof(Header);
     }
@@ -324,6 +352,8 @@ static HF2 hf2;
 void I2C::received(const uint8_t *in, uint8_t *out) { hf2.packet(in, out); }
 
 void main(void) {
+    enter_app();
+
     gpio_pin_configure_dt(&led0, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led1, GPIO_OUTPUT_INACTIVE);
 
@@ -331,8 +361,6 @@ void main(void) {
 
     hf2.init(flash);
     i2c.init();
-
-    //   enter_app();
 
     for (;;) {
         gpio_pin_toggle(led0.port, led0.pin);
