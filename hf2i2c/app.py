@@ -141,9 +141,8 @@ def main(bus: int, address: int, command: int, program: str, start: bool):
     h = HF2(b, address, command)
 
     info = h.get_bininfo()
-    click.echo(
-        f'Found a device with {info.flash_num_pages} pages of {info.flash_page_size} bytes'
-    )
+    click.echo(f'Found a device with {info.flash_num_pages} pages of '
+               f'{info.flash_page_size} bytes')
 
     if program:
         hex = intelhex.IntelHex()
@@ -166,9 +165,8 @@ def main(bus: int, address: int, command: int, program: str, start: bool):
                 h.write_flash_page(address, bytes(data))
                 got, want = h.chksum_pages(address)[0], Crc16Xmodem.calc(data)
                 if got != want and address >= 16384:
-                    raise Exception(
-                        f'Program error at address {address:x}. Want CRC {want:x}, got {got:x}'
-                    )
+                    raise Exception(f'Program error at address {address:x}. '
+                                    f'Want CRC {want:x}, got {got:x}')
 
     if start:
         click.echo('Starting app')
