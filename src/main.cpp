@@ -1,9 +1,8 @@
 /*
- * Copyright (c) 2016 Intel Corporation
+ * Copyright (c) 2021 Google LLC.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-
 #include "hal.h"
 #include "hf2.h"
 #include "i2c_sam0.h"

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2021 Google LLC.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "hf2.h"
 
 #include <drivers/flash.h>

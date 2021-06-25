@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2021 Google LLC.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "i2c_sam0.h"
 
 static constexpr uint8_t kCommand = 0xFE;

@@ -1,12 +1,20 @@
+/*
+ * Copyright (c) 2021 Google LLC.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #pragma once
 
 #include <device.h>
 #include <drivers/gpio.h>
 #include <soc.h>
 
+// Hardware abstraction. Contains the flash details, LEDs, and other devices.
 class HAL {
    public:
+    // Initialise the common devices.
     static void init();
+    // Try to enter the application. Returns if the application is invalid.
     static int enter_app();
 
     static constexpr size_t kFlashSize = FLASH_SIZE;
