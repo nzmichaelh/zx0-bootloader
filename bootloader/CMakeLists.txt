@@ -6,4 +6,4 @@ set(BOARD zx0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zx0-boot)
 
-target_sources(app PRIVATE src/main.cpp src/hf2.cpp src/i2c.cpp src/hal.cpp)
+target_sources(app PRIVATE src/main.cpp src/hf2.cpp src/i2c_sam0.cpp src/hal.cpp)

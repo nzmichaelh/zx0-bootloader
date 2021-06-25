@@ -6,7 +6,7 @@
 
 #include "hal.h"
 #include "hf2.h"
-#include "i2c.h"
+#include "i2c_sam0.h"
 
 static I2C i2c((SercomI2cs *)DT_REG_ADDR(DT_ALIAS(i2c)));
 static HF2 hf2(HAL::flash);

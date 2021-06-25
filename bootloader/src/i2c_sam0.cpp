@@ -1,4 +1,4 @@
-#include "i2c.h"
+#include "i2c_sam0.h"
 
 static constexpr uint8_t kCommand = 0xFE;
 
