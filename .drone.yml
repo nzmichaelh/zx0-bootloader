@@ -1,0 +1,26 @@
+kind: pipeline
+name: default
+
+platform:
+  os: linux
+  arch: arm64
+
+steps:
+  - name: fetch
+    image: alpine/git
+    failure: ignore
+    commands:
+      - git fetch --tags
+
+  - name: build
+    image: python
+    commands:
+      - pip3 install -r requirements.txt
+      - python3 setup.py bdist
+
+  - name: test
+    image: python
+    commands:
+      - pip3 install -r requirements.txt
+      - pip3 install pytest flake8
+      - flake8 hf2i2c
