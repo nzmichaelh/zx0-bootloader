@@ -1,4 +1,7 @@
-"""Host side programmer for the ZX0 bootloader."""
+"""Host side programmer for the ZX0 bootloader.
+
+The bootloader implements the HF2 protocol. See https://github.com/microsoft/uf2/blob/master/hf2.md for the definition including the protocol level values.
+"""
 
 import enum
 from dataclasses import dataclass
@@ -51,10 +54,17 @@ class BinInfo:
     family_id: int
 
 
+class Error(Exception):
+    pass
+
+
 class HF2:
+    """Implements the HF2 flashing protocol over I2C."""
+
+    # Maximum number of bytes per packet. Must fit within the 32 bytes of a Linux write.
     MAX_PACKET = 31
 
-    def __init__(self, bus, address, command):
+    def __init__(self, bus: smbus.SMBus, address: int, command: int):
         self._bus = bus
         self._address = address
         self._command = command
@@ -84,13 +94,13 @@ class HF2:
         header, tag, status, status_info = struct.unpack_from('<BHBB', got, 0)
 
         if (header & Flag.FLAG_MASK) != Flag.CMDPKT_LAST:
-            raise Exception(
+            raise Error(
                 'Target returned a header {header:x}, want the last packet')
         if tag != self._tag:
-            raise Exception(
+            raise Error(
                 f'Target returned the wrong tag. Want {self._tag}, got {tag}')
         if status != Status.OK:
-            raise Exception(f'Target returned status {status}: {status_info}')
+            raise Error(f'Target returned status {status}: {status_info}')
 
         return got[5:]
 
@@ -116,7 +126,7 @@ class HF2:
             struct.unpack_from('<I', got, x)[0] for x in range(0, len(got), 4)
         ]
 
-    def reset_into_app(self):
+    def reset_into_app(self) -> None:
         self.send(Command.RESET_INTO_APP)
 
 
@@ -165,8 +175,8 @@ def main(bus: int, address: int, command: int, program: str, start: bool):
                 h.write_flash_page(address, bytes(data))
                 got, want = h.chksum_pages(address)[0], Crc16Xmodem.calc(data)
                 if got != want and address >= 16384:
-                    raise Exception(f'Program error at address {address:x}. '
-                                    f'Want CRC {want:x}, got {got:x}')
+                    raise Error(f'Program error at address {address:x}. '
+                                f'Want CRC {want:x}, got {got:x}')
 
     if start:
         click.echo('Starting app')

@@ -1,6 +1,6 @@
-# Arduino Zero board configuration
+# ZX0 board configuration
 
-# Copyright (c) 2017 Google LLC.
+# Copyright (c) 2021 Google LLC.
 # SPDX-License-Identifier: Apache-2.0
 
 config BOARD

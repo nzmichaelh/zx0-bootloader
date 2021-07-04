@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 Google LLC.
+ * Copyright (c) 2021 Google LLC.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,7 +19,6 @@
 		zephyr,code-partition = &boot_partition;
 	};
 
-	/* These aliases are provided for compatibility with samples */
 	aliases {
 		led0 = &led0;
 		led1 = &led1;
@@ -78,16 +77,6 @@
 			label = "code";
 			reg = <0x2000 DT_SIZE_K(256-8-16)>;
 			read-only;
-		};
-
-		/*
-		 * The final 16 KiB is reserved for the application.
-		 * Storage partition will be used by FCB/LittleFS/NVS
-		 * if enabled.
-		 */
-		storage_partition: partition@3c000 {
-			label = "storage";
-			reg = <0x0003c000 DT_SIZE_K(16)>;
 		};
 	};
 };
